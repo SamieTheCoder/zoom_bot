@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+data/
+.local/
+deployment.generated.yml
+*.log
+
+# Private research notes and prompts contain the Dokploy API key and meeting links.
+can i host a bot that joins my zoom meetings  from.md
+.md
+*.research.md
+
+# Agent session transcripts contain secrets; never commit them.
+rollout-*.jsonl

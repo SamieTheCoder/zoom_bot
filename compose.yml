@@ -1,0 +1,33 @@
+services:
+  meeting-desk:
+    build: .
+    restart: unless-stopped
+    shm_size: 1gb
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN:?Set the public HTTPS app origin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set a strong workspace password}
+      AUTH_SECRET: ${AUTH_SECRET:?Set a random Auth.js secret}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Set the super admin email}
+      ADMIN_NAME: ${ADMIN_NAME:-Super Admin}
+      REGISTRATION_FIRST_NAME: ${REGISTRATION_FIRST_NAME:-}
+      REGISTRATION_LAST_NAME: ${REGISTRATION_LAST_NAME:-}
+      REGISTRATION_EMAIL: ${REGISTRATION_EMAIL:-}
+      MEETING_URL_SUNDAY: ${MEETING_URL_SUNDAY:-}
+      MEETING_URL_MONDAY: ${MEETING_URL_MONDAY:-}
+      MEETING_URL_TUESDAY: ${MEETING_URL_TUESDAY:-}
+      MEETING_URL_WEDNESDAY: ${MEETING_URL_WEDNESDAY:-}
+      MEETING_URL_THURSDAY: ${MEETING_URL_THURSDAY:-}
+      MEETING_URL_FRIDAY: ${MEETING_URL_FRIDAY:-}
+      MEETING_URL_SATURDAY_AM: ${MEETING_URL_SATURDAY_AM:-}
+      MEETING_URL_SATURDAY_PM: ${MEETING_URL_SATURDAY_PM:-}
+      TZ: UTC
+    volumes:
+      - meeting-data:/data
+    expose:
+      - "3000"
+    # Dokploy routes your domain to port 3000. Do not publish VNC or debugging ports.
+    stop_grace_period: 30s
+    mem_limit: 3g
+    cpus: 2
+volumes:
+  meeting-data:
