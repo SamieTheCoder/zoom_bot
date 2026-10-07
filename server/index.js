@@ -4,6 +4,7 @@ import { BrowserWorker } from './browser.js';
 import { createApp } from './app.js';
 import { activeStatuses } from './domain.js';
 import { createAudit } from './audit.js';
+import { createNotifier } from './notify.js';
 import { seedAdmin } from './users.js';
 import { seedSchedule, materializeSchedule } from './schedule.js';
 
@@ -26,7 +27,7 @@ for (const meeting of store.list()) {
   if (meeting.source === 'google' && meeting.status === 'scheduled') store.update(meeting.id, { status: 'cancelled', autoJoin: false, detail: 'Calendar integration removed.' });
 }
 const audit = await createAudit(store, config.dataDir);
-const browser = new BrowserWorker(store, config);
+const browser = new BrowserWorker(store, config, createNotifier({ url: process.env.ALERT_NTFY_URL, token: process.env.ALERT_NTFY_TOKEN, origin: config.origin }));
 const { app, upgrade } = await createApp({ store, browser, audit, config });
 const server = app.listen(Number(process.env.PORT || 3000), '0.0.0.0', () => console.log(`Meeting Desk listening on port ${process.env.PORT || 3000}; schedule timezone: Asia/Kolkata`));
 server.on('upgrade', upgrade);

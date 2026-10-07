@@ -48,9 +48,26 @@ export function isDue(meeting, now, earlyMinutes) {
     Date.parse(meeting.startsAt) - earlyMinutes * 60000 <= now && Date.parse(meeting.endsAt) > now;
 }
 
+// Human-verification widgets. The bot never solves these; it detects them, pauses, and alerts the owner.
+const challengeFrames = [
+  ['recaptcha', /^https:\/\/(?:www\.)?(?:google\.com|recaptcha\.net)\/recaptcha\/(?:api2|enterprise)\/(?:anchor|bframe)/i],
+  ['hcaptcha', /^https:\/\/(?:[a-z0-9-]+\.)*hcaptcha\.com\//i],
+  ['turnstile', /^https:\/\/challenges\.cloudflare\.com\//i],
+  ['arkose', /^https:\/\/(?:[a-z0-9-]+\.)*(?:arkoselabs\.com|funcaptcha\.com)\//i],
+];
+const challengeText = /verify (?:that )?you(?:'re| are) (?:a )?human|i'?m not a robot|captcha verification|complete the security check|unusual traffic/i;
+
+/** Provider name for a challenge iframe URL, or null. Invisible reCAPTCHA anchors are background scoring, not a challenge. */
+export function challengeProvider(frameUrl = '') {
+  if (/[?&]size=invisible(?:&|$)/i.test(frameUrl) && /\/anchor/i.test(frameUrl)) return null;
+  for (const [provider, pattern] of challengeFrames) if (pattern.test(frameUrl)) return provider;
+  return null;
+}
+
 export function classifyZoomPage(text, url = '') {
   if (/\/signin|accounts\.google\.com|\/sso\//i.test(url) || /sign in to (?:join|register)|sign in with google|sign in to your account/i.test(text)) return 'authentication';
-  if (/verify (?:that )?you are (?:a )?human|unusual traffic|captcha verification|access denied|not authorized|not allowed to join|only.*authorized attendees|registration.*denied/i.test(text)) return 'blocked';
+  if (challengeText.test(text)) return 'challenge';
+  if (/access denied|not authorized|not allowed to join|only.*authorized attendees|registration.*denied/i.test(text)) return 'blocked';
   if (/meeting has (?:been )?ended|removed by the host|this meeting has been ended/i.test(text)) return 'ended';
   if (/waiting for (?:the )?host|host will let you in|please wait.*host|waiting room/i.test(text)) return 'waiting';
   return 'unknown';

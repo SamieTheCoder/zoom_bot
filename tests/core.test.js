@@ -34,7 +34,8 @@ test('scheduler joins only enabled upcoming meetings inside the early window', (
 test('page classification never calls a waiting room or unknown page joined', () => {
   assert.equal(classifyZoomPage('Please wait, the host will let you in soon'),'waiting');
   assert.equal(classifyZoomPage('Sign in with Google'),'authentication');
-  assert.equal(classifyZoomPage('Verify you are human'),'blocked');
+  assert.equal(classifyZoomPage('Verify you are human'),'challenge');
+  assert.equal(classifyZoomPage('Access denied'),'blocked');
   assert.equal(classifyZoomPage('This meeting has ended'),'ended');
   assert.equal(classifyZoomPage('Welcome to Zoom'),'unknown');
 });

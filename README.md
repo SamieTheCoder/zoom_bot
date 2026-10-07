@@ -55,6 +55,14 @@ guaranteed unattended join, no CAPTCHA bypass, and no workaround for domain
 restrictions. Use the live browser to complete verification; hosts still
 control admission.
 
+When Zoom shows a visible reCAPTCHA, hCaptcha, Turnstile, or "verify you are
+human" page, the bot stops clicking, filling, and reloading on that page, marks
+the attempt **Needs attention**, and (if `ALERT_NTFY_URL` is set) sends a push
+alert through ntfy, with one reminder after 5 minutes. Solve it in **Live
+browser**; the join continues automatically and the solve time is logged.
+Alerts never include meeting links. Use an unguessable topic or a self-hosted
+ntfy server with `ALERT_NTFY_TOKEN`.
+
 A stored session can expire, and a running browser does **not** prove Zoom
 authentication is still valid — access is checked during the meeting flow. Zoom
 UI changes or custom registration fields may need manual help. Registration
@@ -171,7 +179,7 @@ private research notes, and agent session logs out of the repository. Confirm
 - `npm test` exercises Zoom URL validation, scheduling and IST→UTC mapping,
   encryption, persistent storage, browser concurrency, Auth.js authentication
   and session revocation, cross-origin protection, and the DuckDB activity
-  archive. All 13 tests pass.
+  archive. All 16 tests pass.
 - `npm run build` produces the production dashboard assets.
 - `.github/workflows/ci.yml` runs `npm ci`, `npm test`, and `npm run build` on
   every push to `main` and on pull requests.
