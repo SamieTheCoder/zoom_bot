@@ -142,10 +142,10 @@ export class BrowserWorker {
           this.transition(job, 'waiting', 'Waiting for the host to start the meeting or admit you.');
         } else if (!job.joined) {
           const prefs = this.store.settings();
-          await this.fill(page, ['input[name="first_name"]', '#first_name', 'input[placeholder="First Name"]'], prefs.firstName);
-          await this.fill(page, ['input[name="last_name"]', '#last_name', 'input[placeholder="Last Name"]'], prefs.lastName);
-          await this.fill(page, ['input[name="email"]', '#email'], prefs.email);
-          await this.fill(page, ['input[name="email_confirm"]', '#email_confirm'], prefs.email);
+          await this.fill(page, ['input[name="first_name"]', '#first_name', '#inputFirstName', 'input[placeholder="First Name"]'], prefs.firstName);
+          await this.fill(page, ['input[name="last_name"]', '#last_name', '#inputLastName', 'input[placeholder="Last Name"]'], prefs.lastName);
+          await this.fill(page, ['input[name="email"]', '#email', '#inputEmail', 'input[type="email"]', 'input[placeholder="join@company.com"]'], prefs.email);
+          await this.fill(page, ['input[name="email_confirm"]', '#email_confirm', '#inputConfirmEmail', 'input[placeholder="Confirm Email Address"]'], prefs.email);
           await this.fill(page, ['#input-for-name', 'input[name="displayName"]', '#inputname'], meeting.displayName);
           await this.fill(page, ['#input-for-pwd', 'input[name="passcode"]', '#inputpasscode'], meeting.passcode);
           let clicked = false;
