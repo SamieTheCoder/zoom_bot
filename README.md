@@ -4,6 +4,7 @@ A private, single-owner dashboard that signs into Zoom in a real browser you
 control, then joins your fixed weekly sessions on a schedule — including Zoom
 **registration** links that need your name and email filled in first.
 
+
 It is built for one person: you sign in once, the browser session is reused for
 every meeting, and a private panel shows exactly what the bot did and whether it
 got in. There is no recording, no transcription, and no microphone or camera.
