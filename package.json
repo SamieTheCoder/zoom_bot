@@ -7,7 +7,7 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host localhost",
     "server": "node --env-file-if-exists=.env server/index.js",
     "build": "vite build",
     "start": "node --env-file-if-exists=.env server/index.js",
@@ -30,6 +30,7 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "agentation": "3.1.2",
     "vite": "^7.1.0"
   }
 }

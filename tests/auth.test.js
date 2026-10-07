@@ -34,3 +34,18 @@ test('password changes revoke sessions and stored passwords are hashed',async()=
     await c.login(f.config.adminEmail,'new-long-secret-password');assert.equal((await c.request('/api/state')).status,200);
   } finally {await f.close();}
 });
+test('stopped or missed meetings can be restored to upcoming only while their window is open', async () => {
+  const f = await fixture(), c = client(f.base);
+  try {
+    await c.login(f.config.adminEmail, f.config.adminPassword);
+    const open = f.store.add({ title: 'Test', url: 'https://zoom.us/j/123456789', startsAt: new Date().toISOString(), endsAt: new Date(Date.now() + 3600000).toISOString(), autoJoin: false, source: 'manual' });
+    f.store.update(open.id, { status: 'cancelled', detail: 'Stopped by you.', joinedAt: new Date().toISOString() });
+    assert.equal((await c.request(`/api/meetings/${open.id}/restore`, {})).status, 200);
+    const restored = f.store.meeting(open.id);
+    assert.equal(restored.status, 'scheduled'); assert.equal(restored.joinedAt, null);
+    assert.equal((await c.request(`/api/meetings/${open.id}/restore`, {})).status, 409, 'already upcoming');
+    const ended = f.store.add({ title: 'Old', startsAt: new Date(Date.now() - 7200000).toISOString(), endsAt: new Date(Date.now() - 3600000).toISOString(), source: 'manual' });
+    f.store.update(ended.id, { status: 'missed' });
+    assert.equal((await c.request(`/api/meetings/${ended.id}/restore`, {})).status, 409);
+  } finally { await f.close(); }
+});

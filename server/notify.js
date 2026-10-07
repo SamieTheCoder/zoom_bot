@@ -7,9 +7,11 @@ export function createNotifier({ url, token, origin, fetchImpl = globalThis.fetc
   return {
     enabled: true,
     async send({ title, message, priority = 'high', tags = [] }) {
-      const headers = { Title: title.replace(/[^\x20-\x7e]/g, ''), Priority: priority, Tags: tags.join(','), Click: origin };
+      const headers = { Title: title.replace(/[^\x20-\x7e]/g, ''), Priority: priority, Tags: tags.join(',') };
+      if (origin) { headers.Click = origin; headers.Actions = `view, Open Meeting Desk, ${origin}`; }
       if (token) headers.Authorization = `Bearer ${token}`;
-      const response = await fetchImpl(target, { method: 'POST', body: message, headers, signal: AbortSignal.timeout(10000) });
+      const body = origin ? `${message}\n${origin}` : message;
+      const response = await fetchImpl(target, { method: 'POST', body, headers, signal: AbortSignal.timeout(10000) });
       if (!response.ok) throw new Error(`Alert service responded ${response.status}.`);
       return true;
     },

@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { challengeProvider, classifyZoomPage, isDue, zoomUrl } from './domain.js';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+export const POLL_REMINDER_MINUTES = 110;
 
 export class BrowserWorker {
   constructor(store, config, notifier = { enabled: false, send: async () => false }) {
@@ -33,9 +34,9 @@ export class BrowserWorker {
     }
     return kind === 'challenge' ? 'zoom' : null;
   }
-  async alert(job, title, message) {
+  async alert(job, title, message, { priority = 'high', tags = ['warning'] } = {}) {
     if (!this.notifier.enabled) return;
-    try { await this.notifier.send({ title, message, tags: ['warning'] }); this.store.log('Alert sent to your phone.', job.id, 'alert_sent'); }
+    try { await this.notifier.send({ title, message, priority, tags }); this.store.log('Alert sent to your phone.', job.id, 'alert_sent', { title }); }
     catch (error) { this.store.log(`Alert could not be sent: ${error.message}`, job.id, 'alert_failed'); }
   }
   /** Pause automation on a challenge, alert once, remind once, and resume when it disappears. Returns true while paused. */
@@ -172,12 +173,17 @@ export class BrowserWorker {
         if (kind === 'authentication' || kind === 'blocked') {
           this.transition(job, 'needs_attention', kind === 'blocked' ? 'Zoom denied access to this meeting. Check the account or registration in the live browser.' : 'Zoom sign-in is required. Open the live browser to continue.');
         } else if (await page.getByRole('button', { name: /^(?:Leave|Leave Meeting)$/i }).first().isVisible().catch(() => false)) {
-          job.joined = true;
+          if (!job.joined) {
+            job.joined = true;
+            void this.alert(job, 'Meeting Desk: joined', `${meeting.title}: joined. Zoom meeting controls are visible.`, { priority: 'default', tags: ['white_check_mark'] });
+          }
           this.transition(job, 'in_meeting', 'Joined — Zoom meeting controls are visible.');
-          if (!job.pollReminded && Date.now() >= Date.parse(meeting.startsAt) + 105 * 60000) {
+          // Poll automation is not configured yet, so remind the owner at 1h50m to answer it manually.
+          if (!job.pollReminded && Date.now() >= Date.parse(meeting.startsAt) + POLL_REMINDER_MINUTES * 60000) {
             job.pollReminded = true;
             this.store.update(job.id, { pollReminderAt: new Date().toISOString() });
-            this.store.log('Scheduled poll window reached. Poll automation is not configured; check the live browser.', job.id, 'poll_manual_action');
+            this.store.log('Poll time reached (1h50m). Poll automation is not configured; answer it in the live browser.', job.id, 'poll_manual_action');
+            void this.alert(job, 'Meeting Desk: answer the poll', `${meeting.title}: 1h50m mark reached. Open Live browser and answer the poll.`, { priority: 'urgent', tags: ['bar_chart'] });
           }
           // Media permissions are never granted. If Zoom has activated a microphone or camera, turn it off.
           await this.click(page, 'button', /^Mute(?: my audio)?(?: \(.*\))?$/i).catch(() => {});

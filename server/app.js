@@ -86,6 +86,14 @@ export async function createApp({ store, browser, audit, config }) {
     switch (req.params.action) {
       case 'join': await browser.start(meeting.id); break;
       case 'stop': await browser.stop(meeting.id); break;
+      case 'restore':
+        // Bring a stopped/missed/failed occurrence back to Upcoming, as long as its window has not ended.
+        if (activeStatuses.includes(meeting.status) || meeting.status === 'scheduled' || browser.status().activeMeetingId === meeting.id)
+          return res.status(409).json({ error: 'Only past attempts can be restored.' });
+        if (Date.parse(meeting.endsAt) <= Date.now()) return res.status(409).json({ error: 'This meeting has already ended and cannot be restored.' });
+        store.update(meeting.id, { status: 'scheduled', detail: 'Restored to upcoming by you.', joinedAt: null, endedAt: null, joinedSeconds: 0, pollReminderAt: null, lastObservedAt: null });
+        store.log('Meeting restored to upcoming.', meeting.id, 'meeting_restored', { previousStatus: meeting.status });
+        break;
       case 'toggle':
         if (meeting.status !== 'scheduled') return res.status(409).json({ error: 'Only scheduled meetings can change auto-join.' });
         store.update(meeting.id, { autoJoin: !meeting.autoJoin }); break;

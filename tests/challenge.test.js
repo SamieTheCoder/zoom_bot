@@ -28,6 +28,8 @@ test('notifier posts to ntfy without meeting links and rejects plain HTTP', asyn
   assert.equal(calls[0].url, 'https://ntfy.example/topic');
   assert.equal(calls[0].headers.Title, 'Verification needed ');
   assert.equal(calls[0].headers.Click, 'https://desk.example');
+  assert.equal(calls[0].headers.Actions, 'view, Open Meeting Desk, https://desk.example');
+  assert.equal(calls[0].body, 'Sunday session: solve it\nhttps://desk.example');
   assert.equal(calls[0].headers.Authorization, 'Bearer t');
 });
 
@@ -46,7 +48,7 @@ test('worker pauses on a challenge, alerts once, and resumes when it is solved',
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(store.meeting(meeting.id).status, 'needs_attention');
     assert.equal(sent.length, 1);
-    assert.ok(!sent[0].message.includes('http'));
+    assert.ok(!/zoom\.us/.test(sent[0].message));
     assert.equal(worker.status().challenge.provider, 'recaptcha');
     assert.equal(await worker.handleChallenge(job, meeting, page, null), false);
     assert.equal(store.meeting(meeting.id).status, 'joining');

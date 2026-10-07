@@ -45,7 +45,13 @@ got in. There is no recording, no transcription, and no microphone or camera.
 
 Poll automation is **not yet active**. The API reports the poll as
 `awaiting_configuration` (it expects to open around 1h45m and be answered around
-1h50m into a session). Provide the poll's HTML and it will be wired in.
+1h50m into a session). Until it is wired in, the bot sends an urgent ntfy alert
+at the 1h50m mark so you can answer it in **Live browser**. Provide the poll's
+HTML and it will be wired in.
+
+With `ALERT_NTFY_URL` set you also get a push when a join is confirmed. Every
+alert carries an **Open Meeting Desk** button and your dashboard link
+(`APP_ORIGIN`), never the Zoom link.
 
 ## Limits that matter
 
