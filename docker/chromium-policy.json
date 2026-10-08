@@ -1,0 +1,7 @@
+{
+  "URLBlocklist": ["zoommtg://*", "zoomus://*", "zoomphonecall://*"],
+  "ExternalProtocolDialogShowAlwaysOpenCheckbox": false,
+  "DefaultNotificationsSetting": 2,
+  "AudioCaptureAllowed": false,
+  "VideoCaptureAllowed": false
+}

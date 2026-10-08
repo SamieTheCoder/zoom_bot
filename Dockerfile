@@ -21,6 +21,8 @@ COPY package.json ./
 COPY server ./server
 COPY docker/supervisord.conf /etc/supervisor/conf.d/meeting-desk.conf
 COPY docker/entrypoint.sh /app/entrypoint.sh
+# Block Zoom desktop-app protocols so Chromium never shows the native "Open Zoom?" prompt.
+COPY docker/chromium-policy.json /etc/chromium/policies/managed/meeting-desk.json
 RUN mkdir -p /data /home/node/.config && chown -R node:node /data /home/node \
     && chmod 755 /app/entrypoint.sh
 EXPOSE 3000

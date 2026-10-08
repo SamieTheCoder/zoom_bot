@@ -30,6 +30,14 @@ got in. There is no recording, no transcription, and no microphone or camera.
   early (default 10), fills the standard registration fields (first name, last
   name, email) from your saved details, and follows visible **Register and
   Join** / **Join from Browser** controls, then monitors admission.
+- **No "Open Zoom app?" prompt.** Launcher links (`/j/<id>`, `/w/<id>`) are
+  redirected inside the browser to the web client (`app.zoom.us/wc/<id>/join`)
+  with `tk`/`pwd` preserved, so Zoom never fires `zoommtg://`. The Docker image
+  also blocks Zoom app protocols by Chromium policy. The join form and meeting
+  controls are read from inside Zoom's `iframe#webclient`.
+- **Sign-in recovery.** If Zoom redirects to `/signin`, the attempt is marked
+  needs-attention and an alert is sent once. After you sign in in **Live
+  browser**, the bot returns to the meeting's join URL automatically.
 - **One meeting at a time.** Overlapping meetings wait for the browser until
   their end time and are then marked missed. The bot leaves at the scheduled
   end.

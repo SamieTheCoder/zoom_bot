@@ -11,6 +11,34 @@ export function zoomUrl(input) {
   return url.toString();
 }
 
+const zoomHost = /^https:\/\/(?:[a-z0-9-]+\.)*zoom\.(?:us|com)\//i;
+export const isZoomHost = url => zoomHost.test(String(url || ''));
+
+/**
+ * Rewrites a Zoom launcher link (/j/<id>, /w/<id>) to the browser web client, keeping every query
+ * parameter (pwd, tk, routing ids). The launcher page fires zoommtg:// which opens Chrome's native
+ * "Open Zoom?" prompt; that prompt is outside the page and cannot be clicked by automation.
+ */
+export function webClientUrl(input) {
+  let url;
+  try { url = new URL(input); } catch { return null; }
+  if (!isZoomHost(url.href)) return null;
+  const match = url.pathname.match(/^\/(?:j|w)\/(\d{9,11})(?:\/|$)/);
+  if (!match) return null;
+  const target = new URL(`https://app.zoom.us/wc/${match[1]}/join`);
+  for (const [key, value] of url.searchParams) target.searchParams.append(key, value);
+  if (!target.searchParams.has('ref_from')) target.searchParams.set('ref_from', 'launch');
+  return target.toString();
+}
+
+/** True for pages that belong to a specific meeting: web client, launcher, or registration. */
+export function isMeetingPath(input) {
+  try {
+    const { pathname } = new URL(input);
+    return /^\/(?:wc\/(?:join\/)?\d{9,11}|wc\/\d{9,11}\/join|j\/\d{9,11}|w\/\d{9,11}|meeting\/register\/|webinar\/register\/)/i.test(pathname);
+  } catch { return false; }
+}
+
 export function extractZoomUrl(text) {
   const candidates = String(text || '').replaceAll('&amp;', '&').match(/https:\/\/[^\s<>"']+/g) || [];
   for (const candidate of candidates) {

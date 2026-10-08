@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { zoomUrl, extractZoomUrl, meetingSchema, isDue, classifyZoomPage } from '../server/domain.js';
+import { zoomUrl, extractZoomUrl, meetingSchema, isDue, classifyZoomPage, webClientUrl, isMeetingPath } from '../server/domain.js';
 import { cryptoBox, cookieToken } from '../server/security.js';
 import { createStore } from '../server/store.js';
 import { BrowserWorker } from '../server/browser.js';
@@ -30,6 +30,25 @@ test('scheduler joins only enabled upcoming meetings inside the early window', (
   assert.equal(isDue(m,Date.parse(m.endsAt),10),false);
   assert.equal(isDue({...m,autoJoin:false},Date.parse(m.startsAt),10),false);
   assert.equal(isDue({...m,status:'cancelled'},Date.parse(m.startsAt),10),false);
+});
+test('launcher links go straight to the web client so the native Open Zoom prompt never fires', () => {
+  const target = new URL(webClientUrl('https://us06web.zoom.us/j/88107036363?tk=TOKEN&pwd=PASS.1#success'));
+  assert.equal(target.origin + target.pathname, 'https://app.zoom.us/wc/88107036363/join');
+  assert.equal(target.searchParams.get('tk'), 'TOKEN');
+  assert.equal(target.searchParams.get('pwd'), 'PASS.1');
+  assert.equal(target.searchParams.get('ref_from'), 'launch');
+  assert.ok(webClientUrl('https://zoom.us/w/98765432101?tk=a'));
+  for (const url of ['https://app.zoom.us/wc/88107036363/join?tk=a', 'https://zoom.us/meeting/register/abc', 'https://evil.com/j/88107036363', 'not a url']) assert.equal(webClientUrl(url), null, url);
+  assert.equal(zoomUrl('https://app.zoom.us/wc/88107036363/join?tk=a'), 'https://app.zoom.us/wc/88107036363/join?tk=a');
+});
+test('sign-in return logic recognises meeting pages and the PWA sign-in redirect', () => {
+  assert.equal(isMeetingPath('https://app.zoom.us/wc/88107036363/join?fromPWA=1'), true);
+  assert.equal(isMeetingPath('https://zoom.us/wc/join/88107036363'), true);
+  assert.equal(isMeetingPath('https://zoom.us/meeting/register/abc#/registration'), true);
+  assert.equal(isMeetingPath('https://app.zoom.us/wc/home'), false);
+  assert.equal(isMeetingPath('https://zoom.us/profile'), false);
+  assert.equal(classifyZoomPage('Sign in Next', 'https://app.zoom.us/signin?from=pwa#/login'), 'authentication');
+  assert.equal(classifyZoomPage('Zoom is protected by reCAPTCHA and the Google Privacy Policy', 'https://app.zoom.us/wc/1/join'), 'unknown');
 });
 test('page classification never calls a waiting room or unknown page joined', () => {
   assert.equal(classifyZoomPage('Please wait, the host will let you in soon'),'waiting');

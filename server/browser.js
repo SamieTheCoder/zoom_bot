@@ -1,9 +1,12 @@
 import { chromium } from 'playwright-core';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { challengeProvider, classifyZoomPage, isDue, zoomUrl } from './domain.js';
+import { challengeProvider, classifyZoomPage, isDue, isMeetingPath, isZoomHost, webClientUrl, zoomUrl } from './domain.js';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Zoom's own "allow microphone/camera?" sheet. Declining media is always safe; it never grants access.
+const DECLINE_MEDIA = [/^Continue without (?:microphone and camera|audio or video|audio and video)$/i];
+const JOIN_LABELS = [/^Register and Join$/i, /^Join from (?:Your )?Browser$/i, /^Join Meeting$/i, /^Join Webinar$/i, /^Join$/i];
 export const POLL_REMINDER_MINUTES = 110;
 
 export class BrowserWorker {
@@ -23,16 +26,40 @@ export class BrowserWorker {
       desktopAvailable: this.config.desktopEnabled, lastError: this.lastError, alertsEnabled: this.notifier.enabled,
       challenge: this.active?.challenge ? { provider: this.active.challenge.provider, since: new Date(this.active.challenge.since).toISOString() } : null };
   }
-  /** Finds a human-verification challenge that is actually shown to the user (not hidden background scoring). */
+  /** True when a checkbox-style widget inside a challenge frame reports it has been solved. */
+  async challengeSolved(frame) {
+    return frame.locator('#recaptcha-anchor[aria-checked="true"], #checkbox[aria-checked="true"], #success[style*="display: grid"], #success:visible')
+      .first().isVisible({ timeout: 500 }).catch(() => false);
+  }
+  /** Finds a human-verification challenge that is actually shown and still unsolved (not hidden background scoring). */
   async findChallenge(page, kind) {
+    const viewport = page.viewportSize() || await page.evaluate(() => ({ width: innerWidth, height: innerHeight })).catch(() => null);
     for (const frame of page.frames()) {
       const provider = challengeProvider(frame.url());
       if (!provider) continue;
       const element = await frame.frameElement().catch(() => null);
       const box = element && await element.isVisible().catch(() => false) ? await element.boundingBox().catch(() => null) : null;
-      if (box && box.width > 40 && box.height > 40 && box.y + box.height > 0 && box.x + box.width > 0) return provider;
+      if (!box || box.width <= 40 || box.height <= 40 || box.y + box.height <= 0 || box.x + box.width <= 0) continue;
+      if (viewport && (box.x >= viewport.width || box.y >= viewport.height)) continue;
+      // A solved checkbox stays on screen with a tick. It is no longer a challenge.
+      if (await this.challengeSolved(frame)) continue;
+      return provider;
     }
     return kind === 'challenge' ? 'zoom' : null;
+  }
+  /** Clear any pending verification/sign-in state, logging how long it took. Used when the user resolves it or the join succeeds. */
+  clearPending(job, reason) {
+    const now = Date.now();
+    if (job.challenge) {
+      const seconds = Math.round((now - job.challenge.since) / 1000);
+      this.store.log(`Verification completed after ${seconds}s. ${reason}`, job.id, 'captcha_cleared', { provider: job.challenge.provider, seconds });
+      job.challenge = null;
+    }
+    if (job.signInSince) {
+      const seconds = Math.round((now - job.signInSince) / 1000);
+      this.store.log(`Zoom sign-in completed after ${seconds}s. ${reason}`, job.id, 'signin_completed', { seconds });
+      job.signInSince = null;
+    }
   }
   async alert(job, title, message, { priority = 'high', tags = ['warning'] } = {}) {
     if (!this.notifier.enabled) return;
@@ -56,10 +83,9 @@ export class BrowserWorker {
       return true;
     }
     if (job.challenge) {
-      const seconds = Math.round((now - job.challenge.since) / 1000);
-      this.store.log(`Verification completed after ${seconds}s. Continuing the join.`, job.id, 'captcha_cleared', { provider: job.challenge.provider, seconds });
-      job.challenge = null; job.started = now; job.lastReload = now;
-      this.transition(job, 'joining', 'Verification completed. Continuing the join.');
+      this.clearPending(job, 'Continuing the join.');
+      job.started = now; job.lastReload = now;
+      this.transition(job, job.joined ? 'in_meeting' : 'joining', job.joined ? 'Joined — Zoom meeting controls are visible.' : 'Verification completed. Continuing the join.');
     }
     return false;
   }
@@ -73,8 +99,22 @@ export class BrowserWorker {
       const context = await chromium.launchPersistentContext(join(this.config.dataDir, 'browser-profile'), {
         executablePath, headless: this.config.headless, viewport: null,
         acceptDownloads: false, locale: 'en-US', timeout: 45000,
-        args: ['--disable-dev-shm-usage', '--no-first-run', '--disable-notifications', '--window-size=1440,900', '--autoplay-policy=no-user-gesture-required'],
+        args: ['--disable-dev-shm-usage', '--no-first-run', '--disable-notifications', '--deny-permission-prompts',
+          '--window-size=1440,900', '--autoplay-policy=no-user-gesture-required'],
       });
+      // Send top-level launcher navigations (/j/<id>) straight to the web client, so Zoom never
+      // fires zoommtg:// and Chrome never shows its native "Open Zoom Meetings?" prompt.
+      await context.route(/^https:\/\/(?:[a-z0-9-]+\.)*zoom\.(?:us|com)\/(?:j|w)\/\d{9,11}/i, async route => {
+        const request = route.request();
+        let topLevel = false;
+        try { topLevel = request.isNavigationRequest() && request.frame() === request.frame().page().mainFrame(); } catch { /* worker request */ }
+        const target = topLevel ? webClientUrl(request.url()) : null;
+        if (!target) return route.continue();
+        this.store.log('Skipped the Zoom app launcher; opening the browser web client.', this.active?.id || null, 'launcher_bypassed');
+        return route.fulfill({ status: 302, headers: { location: target, 'cache-control': 'no-store' } });
+      });
+      context.on('page', page => this.guardPage(page));
+      for (const page of context.pages()) this.guardPage(page);
       this.context = context;
       this.lastError = null;
       context.on('close', () => {
@@ -132,20 +172,49 @@ export class BrowserWorker {
       if (this.active === job) this.active = null;
     });
   }
+  /** JS dialogs block the page until answered. Let navigations proceed; dismiss everything else. */
+  guardPage(page) {
+    if (page.__meetingDeskGuarded) return;
+    page.__meetingDeskGuarded = true;
+    page.on('dialog', dialog => (dialog.type() === 'beforeunload' ? dialog.accept() : dialog.dismiss()).catch(() => {}));
+  }
+  /**
+   * Zoom's web client renders inside iframe#webclient on app.zoom.us/wc/<id>/join, so the join form and
+   * meeting controls are not in the top document. Inspect the top frame plus every Zoom-hosted frame.
+   */
+  zoomFrames(page) {
+    const main = page.mainFrame();
+    return page.frames().filter(frame => !frame.isDetached() && (frame === main || isZoomHost(frame.url())));
+  }
+  async frameText(page) {
+    const parts = await Promise.all(this.zoomFrames(page).map(frame =>
+      frame.locator('body').innerText({ timeout: 3000 }).catch(() => '')));
+    return parts.join('\n').slice(0, 60000);
+  }
   async click(page, role, name) {
-    const element = page.getByRole(role, { name, exact: true }).first();
-    if (await element.isVisible().catch(() => false) && await element.isEnabled().catch(() => false)) {
-      await element.click({ timeout: 2500 }); return true;
+    for (const frame of this.zoomFrames(page)) {
+      const element = frame.getByRole(role, { name, exact: true }).first();
+      if (await element.isVisible().catch(() => false) && await element.isEnabled().catch(() => false)) {
+        await element.click({ timeout: 2500 }); return true;
+      }
+    }
+    return false;
+  }
+  async visible(page, role, name) {
+    for (const frame of this.zoomFrames(page)) {
+      if (await frame.getByRole(role, { name }).first().isVisible().catch(() => false)) return true;
     }
     return false;
   }
   async fill(page, selectors, value) {
     if (!value) return;
-    for (const selector of selectors) {
-      const input = page.locator(selector).first();
-      if (await input.isVisible().catch(() => false)) {
-        if (!(await input.inputValue().catch(() => ''))) await input.fill(value, { timeout: 2000 });
-        return;
+    for (const frame of this.zoomFrames(page)) {
+      for (const selector of selectors) {
+        const input = frame.locator(selector).first();
+        if (await input.isVisible().catch(() => false)) {
+          if (!(await input.inputValue().catch(() => ''))) await input.fill(value, { timeout: 2000 });
+          return;
+        }
       }
     }
   }
@@ -154,25 +223,58 @@ export class BrowserWorker {
     if (job.cancelled) return;
     job.page = await context.newPage();
     let page = job.page;
-    page.on('popup', async popup => {
-      if (job.cancelled) return popup.close().catch(() => {});
-      job.page = popup;
-      await page.close().catch(() => {});
-      page = popup;
-    });
-    await page.goto(zoomUrl(meeting.url), { waitUntil: 'domcontentloaded', timeout: 45000 });
+    const adopt = target => {
+      target.on('popup', async popup => {
+        if (job.cancelled) return popup.close().catch(() => {});
+        const previous = job.page;
+        job.page = popup; adopt(popup);
+        if (previous && previous !== popup) await previous.close().catch(() => {});
+      });
+    };
+    adopt(page);
+    const firstUrl = zoomUrl(meeting.url);
+    await page.goto(webClientUrl(firstUrl) || firstUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
     while (!job.cancelled && Date.now() < Date.parse(meeting.endsAt)) {
       page = job.page;
       if (page.isClosed()) { this.transition(job, 'interrupted', 'Meeting window was closed.'); return; }
       try {
-        const text = (await page.locator('body').innerText({ timeout: 5000 })).slice(0, 40000);
-        const kind = classifyZoomPage(text, page.url());
-        // Never click, fill, or reload while verification is open; the owner solves it in the live browser.
-        if (await this.handleChallenge(job, meeting, page, await this.findChallenge(page, kind))) { await delay(2500); continue; }
-        if (kind === 'ended') { this.transition(job, 'completed', 'Zoom reports that the meeting has ended.'); return; }
-        if (kind === 'authentication' || kind === 'blocked') {
-          this.transition(job, 'needs_attention', kind === 'blocked' ? 'Zoom denied access to this meeting. Check the account or registration in the live browser.' : 'Zoom sign-in is required. Open the live browser to continue.');
-        } else if (await page.getByRole('button', { name: /^(?:Leave|Leave Meeting)$/i }).first().isVisible().catch(() => false)) {
+        const url = page.url();
+        // Remember the last web-client join URL so we can return to it after Zoom sign-in.
+        if (/\/wc\/(?:join\/)?\d{9,11}/.test(url)) job.joinUrl = url;
+        // A launcher page that slipped past the route (e.g. opened by script): go to the web client directly.
+        const direct = webClientUrl(url);
+        if (direct) { await page.goto(direct, { waitUntil: 'domcontentloaded', timeout: 30000 }); await delay(2500); continue; }
+        const text = await this.frameText(page);
+        const kind = classifyZoomPage(text, url);
+        // A visible Leave control is the strongest evidence. Once in the meeting, nothing else may flag attention.
+        // Zoom auto-hides its toolbar, so after a confirmed join nudge the mouse to reveal it before deciding.
+        let inMeeting = kind !== 'ended' && await this.visible(page, 'button', /^(?:Leave|Leave Meeting)$/i);
+        if (!inMeeting && job.joined && kind !== 'ended') {
+          await page.mouse.move(400 + Math.random() * 200, 300 + Math.random() * 100).catch(() => {});
+          await delay(300);
+          inMeeting = await this.visible(page, 'button', /^(?:Leave|Leave Meeting)$/i);
+        }
+        // Still joined if the toolbar is merely hidden and nothing shows we left (sign-in, removal, waiting room).
+        const stillJoined = !inMeeting && job.joined && kind === 'unknown';
+        if (inMeeting || stillJoined) {
+          this.clearPending(job, 'Joined the meeting.');
+          if (stillJoined) { await delay(2500); continue; }
+        } else if (await this.handleChallenge(job, meeting, page, await this.findChallenge(page, kind))) {
+          // Never click, fill, or reload while verification is open; the owner solves it in the live browser.
+          await delay(2500); continue;
+        }
+        if (!inMeeting && kind !== 'authentication' && job.signInSince) {
+          // Sign-in finished. Zoom usually returns to the meeting; if it lands elsewhere, go back ourselves.
+          this.clearPending(job, 'Continuing the join.');
+          job.started = Date.now();
+          this.transition(job, 'joining', 'Signed in to Zoom. Continuing the join.');
+          if (isZoomHost(url) && !isMeetingPath(url)) {
+            await page.goto(job.joinUrl || webClientUrl(firstUrl) || firstUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await delay(2500); continue;
+          }
+        }
+        if (kind === 'ended') { this.transition(job, job.joined ? 'completed' : 'missed', job.joined ? 'Zoom reports that the meeting has ended.' : 'Zoom reports that the meeting has ended before a confirmed join.'); return; }
+        if (inMeeting) {
           if (!job.joined) {
             job.joined = true;
             void this.alert(job, 'Meeting Desk: joined', `${meeting.title}: joined. Zoom meeting controls are visible.`, { priority: 'default', tags: ['white_check_mark'] });
@@ -188,6 +290,19 @@ export class BrowserWorker {
           // Media permissions are never granted. If Zoom has activated a microphone or camera, turn it off.
           await this.click(page, 'button', /^Mute(?: my audio)?(?: \(.*\))?$/i).catch(() => {});
           await this.click(page, 'button', /^Stop Video(?: \(.*\))?$/i).catch(() => {});
+        } else if (kind === 'authentication') {
+          if (!job.signInSince) {
+            job.signInSince = Date.now();
+            this.store.log('Zoom asked for sign-in. Waiting for you in the live browser.', job.id, 'signin_required');
+            await page.bringToFront().catch(() => {});
+            if (!job.signInAlerted) {
+              job.signInAlerted = true;
+              void this.alert(job, 'Meeting Desk: Zoom sign-in needed', `${meeting.title}: Zoom wants you to sign in. Open Live browser and sign in; the join continues automatically.`);
+            }
+          }
+          this.transition(job, 'needs_attention', 'Zoom sign-in is required. Sign in in the live browser; the bot returns to the meeting automatically.');
+        } else if (kind === 'blocked') {
+          this.transition(job, 'needs_attention', 'Zoom denied access to this meeting. Check the account or registration in the live browser.');
         } else if (kind === 'waiting') {
           this.transition(job, 'waiting', 'Waiting for the host to start the meeting or admit you.');
         } else if (!job.joined) {
@@ -199,7 +314,8 @@ export class BrowserWorker {
           await this.fill(page, ['#input-for-name', 'input[name="displayName"]', '#inputname'], meeting.displayName);
           await this.fill(page, ['#input-for-pwd', 'input[name="passcode"]', '#inputpasscode'], meeting.passcode);
           let clicked = false;
-          for (const label of [/^Register and Join$/i, /^Join from (?:Your )?Browser$/i, /^Join Meeting$/i, /^Join$/i]) {
+          for (const label of DECLINE_MEDIA) if (await this.click(page, 'button', label)) { clicked = true; break; }
+          for (const label of clicked ? [] : JOIN_LABELS) {
             if (await this.click(page, 'button', label) || await this.click(page, 'link', label)) { clicked = true; break; }
           }
           if (!clicked && /\/meeting\/register\//.test(page.url()) && Date.now() - job.lastReload > 30000) {

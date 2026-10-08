@@ -33,6 +33,34 @@ test('notifier posts to ntfy without meeting links and rejects plain HTTP', asyn
   assert.equal(calls[0].headers.Authorization, 'Bearer t');
 });
 
+test('a confirmed join clears pending verification and sign-in, and never reverts to needs attention', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'meeting-joined-'));
+  const store = createStore(directory);
+  const worker = new BrowserWorker(store, {}, { enabled: false, send: async () => false });
+  const page = { bringToFront: async () => {} };
+  try {
+    const meeting = store.add({ title: 'Monday session', startsAt: new Date().toISOString(), endsAt: new Date(Date.now() + 60000).toISOString(), autoJoin: true });
+    const job = { id: meeting.id, cancelled: false, started: Date.now(), lastReload: Date.now() };
+    worker.active = job;
+    await worker.handleChallenge(job, meeting, page, 'recaptcha');
+    job.signInSince = Date.now();
+    assert.equal(store.meeting(meeting.id).status, 'needs_attention');
+    // Join confirmed while the verification flag was still set: clear it and report the join.
+    worker.clearPending(job, 'Joined the meeting.');
+    job.joined = true;
+    worker.transition(job, 'in_meeting', 'Joined — Zoom meeting controls are visible.');
+    assert.equal(worker.status().challenge, null);
+    assert.equal(job.signInSince, null);
+    assert.equal(store.meeting(meeting.id).status, 'in_meeting');
+    // A challenge that clears after joining restores in_meeting, not joining.
+    await worker.handleChallenge(job, meeting, page, 'recaptcha');
+    await worker.handleChallenge(job, meeting, page, null);
+    assert.equal(store.meeting(meeting.id).status, 'in_meeting');
+    const kinds = store.db.prepare('SELECT kind FROM audit_outbox').all().map(e => e.kind);
+    assert.ok(kinds.includes('signin_completed') && kinds.filter(k => k === 'captcha_cleared').length === 2);
+  } finally { worker.active = null; store.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('worker pauses on a challenge, alerts once, and resumes when it is solved', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'meeting-challenge-'));
   const store = createStore(directory);
