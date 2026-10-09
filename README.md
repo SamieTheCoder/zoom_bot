@@ -4,10 +4,35 @@ A private, single-owner dashboard that signs into Zoom in a real browser you
 control, then joins your fixed weekly sessions on a schedule — including Zoom
 **registration** links that need your name and email filled in first.
 
-
 It is built for one person: you sign in once, the browser session is reused for
 every meeting, and a private panel shows exactly what the bot did and whether it
 got in. There is no recording, no transcription, and no microphone or camera.
+
+> [!IMPORTANT]
+> **Educational use only. Do not misuse this project.**
+>
+> Meeting Desk is shared as a learning project — to study browser automation,
+> scheduling, authentication, and crash-safe storage. Use it **only** to join
+> meetings you are personally invited to and allowed to attend, with your own
+> account, under the host's and your organization's rules.
+>
+> Do not use it to join meetings without permission, to evade a host's
+> admission controls, to impersonate anyone, to bypass CAPTCHAs or security
+> checks, or to attend on someone else's behalf against the meeting's terms.
+> Browser automation is an **unofficial** Zoom integration; Zoom's Terms of
+> Service and your institution's policies take precedence. You are solely
+> responsible for how you use it. The authors provide this code **as-is, with no
+> warranty**, and accept no liability for misuse.
+
+## Screenshots
+
+The dashboard is a single private workspace — the overview is where you add a
+meeting, watch the next session, and review history. (UI copy evolves between
+releases; your build may show slightly different labels.)
+
+| Desktop | Mobile |
+|---|---|
+| ![Meeting Desk overview on desktop](docs/screenshots/dashboard-desktop.png) | ![Meeting Desk overview on mobile](docs/screenshots/dashboard-mobile.png) |
 
 ## What it does
 
@@ -26,6 +51,10 @@ got in. There is no recording, no transcription, and no microphone or camera.
   | Saturday | Saturday morning | 10:00 – 12:00 |
   | Saturday | Saturday afternoon | 14:00 – 16:00 |
 
+- **One-off meetings.** Add an ad-hoc Zoom or registration link with a start and
+  end time alongside the weekly schedule (see
+  [Add a one-off meeting](#add-a-one-off-meeting-not-in-your-env)). One-off
+  meetings are added with auto-join off, so you decide when the bot joins them.
 - **Registration-link handling.** The bot opens each meeting up to 15 minutes
   early (default 10), fills the standard registration fields (first name, last
   name, email) from your saved details, and follows visible **Register and
@@ -43,24 +72,47 @@ got in. There is no recording, no transcription, and no microphone or camera.
   end.
 - **Honest live status.** Each attempt reports joining, waiting for host,
   needs-your-help, confirmed join, stopped, or interrupted — confirmed only
-  after real Zoom Leave controls appear.
-- **One-off meetings.** Add an ad-hoc Zoom or registration link with a start and
-  end time alongside the weekly schedule.
+  after real Zoom Leave controls appear. Once a join is confirmed, a reappearing
+  CAPTCHA, a hidden toolbar, or a solved challenge never flips the session back
+  to "needs attention".
 - **Private admin access.** A single super-admin account (Auth.js credentials)
   protects the dashboard and the remote desktop. Sessions are revocable and you
   can change the password in-app.
 - **Durable activity log.** Every action is written to a DuckDB activity archive
   through a crash-safe SQLite outbox, so you can review what the bot did.
 
+## Add a one-off meeting (not in your `.env`)
+
+The eight `.env` links only **seed the weekly schedule**. For a meeting that is
+not part of that schedule — such as an extra session today — add it from the
+dashboard; you do **not** touch `.env`:
+
+1. Open the **Overview** and click **Add test meeting**.
+2. Paste the Zoom join or registration link, set a title, and choose today's
+   start and end time (IST). Add the display name and a passcode if the meeting
+   needs one.
+3. Submit. It appears alongside your weekly sessions, tagged **Test / one-off**.
+4. A one-off meeting starts with **auto-join off**. To let the bot join it,
+   toggle **Auto-join on** in its row, or press **▶ (Join meeting now)** to
+   start it immediately.
+
+Links are validated the same way as the weekly ones: they must be HTTPS Zoom
+join or registration URLs.
+
+## Poll handling (reminder only, no auto-answer)
+
 Poll automation is **not yet active**. The API reports the poll as
 `awaiting_configuration` (it expects to open around 1h45m and be answered around
-1h50m into a session). Until it is wired in, the bot sends an urgent ntfy alert
-at the 1h50m mark so you can answer it in **Live browser**. Provide the poll's
-HTML and it will be wired in.
+1h50m into a session). Until auto-answering is wired in, the bot sends an
+**urgent ntfy alert at the 1h50m mark** so you can answer it yourself in **Live
+browser**, and marks the meeting row "Poll window reached". The reminder fires
+once per meeting and only while a join is confirmed. Provide the poll's HTML and
+answers to have it wired in.
 
-With `ALERT_NTFY_URL` set you also get a push when a join is confirmed. Every
-alert carries an **Open Meeting Desk** button and your dashboard link
-(`APP_ORIGIN`), never the Zoom link.
+With `ALERT_NTFY_URL` set you also get a push when a join is confirmed and when
+Zoom asks for sign-in or human verification. Every alert carries an **Open
+Meeting Desk** button and your dashboard link (`APP_ORIGIN`), never the Zoom
+link.
 
 ## Limits that matter
 
@@ -74,9 +126,10 @@ When Zoom shows a visible reCAPTCHA, hCaptcha, Turnstile, or "verify you are
 human" page, the bot stops clicking, filling, and reloading on that page, marks
 the attempt **Needs attention**, and (if `ALERT_NTFY_URL` is set) sends a push
 alert through ntfy, with one reminder after 5 minutes. Solve it in **Live
-browser**; the join continues automatically and the solve time is logged.
-Alerts never include meeting links. Use an unguessable topic or a self-hosted
-ntfy server with `ALERT_NTFY_TOKEN`.
+browser**; the join continues automatically and the solve time is logged. A
+challenge you have already ticked is treated as solved. Alerts never include
+meeting links. Use an unguessable topic or a self-hosted ntfy server with
+`ALERT_NTFY_TOKEN`.
 
 A stored session can expire, and a running browser does **not** prove Zoom
 authentication is still valid — access is checked during the meeting flow. Zoom
@@ -172,8 +225,9 @@ git push -u origin main
 ```
 
 `.gitignore` keeps `.env`, the `.local/` folder, the `data/` volume, your
-private research notes, and agent session logs out of the repository. Confirm
-`git status` shows none of those before pushing.
+private research notes, and agent session logs out of the repository. The
+`docs/screenshots/` images are committed. Confirm `git status` shows none of the
+private files before pushing.
 
 ## Connect your account and test
 
@@ -191,10 +245,11 @@ private research notes, and agent session logs out of the repository. Confirm
 
 ## Verification
 
-- `npm test` exercises Zoom URL validation, scheduling and IST→UTC mapping,
-  encryption, persistent storage, browser concurrency, Auth.js authentication
-  and session revocation, cross-origin protection, and the DuckDB activity
-  archive. All 16 tests pass.
+- `npm test` exercises Zoom URL validation and launcher-to-web-client
+  rewriting, scheduling and IST→UTC mapping, encryption, persistent storage,
+  browser concurrency, challenge detection and the join-state rules, Auth.js
+  authentication and session revocation, cross-origin protection, and the DuckDB
+  activity archive. All 20 tests pass.
 - `npm run build` produces the production dashboard assets.
 - `.github/workflows/ci.yml` runs `npm ci`, `npm test`, and `npm run build` on
   every push to `main` and on pull requests.

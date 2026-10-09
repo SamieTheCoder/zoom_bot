@@ -99,8 +99,17 @@ export class BrowserWorker {
       const context = await chromium.launchPersistentContext(join(this.config.dataDir, 'browser-profile'), {
         executablePath, headless: this.config.headless, viewport: null,
         acceptDownloads: false, locale: 'en-US', timeout: 45000,
+        // Drop Chromium's automation banner/flag. This does not defeat verification — the owner still
+        // solves any challenge by hand in the live browser — but it stops a legitimate, human-solved
+        // session from being re-challenged endlessly because navigator.webdriver was advertising "bot".
+        ignoreDefaultArgs: ['--enable-automation'],
         args: ['--disable-dev-shm-usage', '--no-first-run', '--disable-notifications', '--deny-permission-prompts',
+          '--disable-blink-features=AutomationControlled',
           '--window-size=1440,900', '--autoplay-policy=no-user-gesture-required'],
+      });
+      // Remove the residual navigator.webdriver=true that the challenge widgets read as a bot signal.
+      await context.addInitScript(() => {
+        try { Object.defineProperty(Object.getPrototypeOf(navigator), 'webdriver', { get: () => undefined }); } catch { /* already shadowed */ }
       });
       // Send top-level launcher navigations (/j/<id>) straight to the web client, so Zoom never
       // fires zoommtg:// and Chrome never shows its native "Open Zoom Meetings?" prompt.
